@@ -1,125 +1,75 @@
 <?php
 
+declare(strict_types=1);
+
 $option = getopt('t:c:h', ['token:', 'channel:', 'help']);
 
-$slackApiKey = isset($option['t']) ? $option['t'] : @$option['token'];
-$channel = isset($option['c']) ? $option['c'] : @$option['channel'];
+$oauthToken = isset($option['t']) ? $option['t'] : @$option['token'];
+$channelName = isset($option['c']) ? $option['c'] : @$option['channel'];
 
-if(isset($option['h']) OR isset($option['help'])){
+if (isset($option['h']) || isset($option['help'])) {
     help();
     exit(0);
 }
 
-if(!isset($slackApiKey) OR !isset($channel)){
+if (!isset($oauthToken) || !isset($channelName)) {
     echo "Invalid argument\n\n";
     help();
     exit(1);
 }
 
-$channel = str_replace('#', '', $channel);
+$channelName = str_replace('#', '', $channelName);
 
-$channelId = getChannelId($slackApiKey, $channel);
-$tsList = getTsList($slackApiKey, $channelId);
+$channelId = (function () use ($oauthToken, $channelName) {
+    $url = "https://slack.com/api/conversations.list?token=${oauthToken}";
+    $json = json_decode(file_get_contents($url), true);
+    foreach ($json['channels'] as $channel) {
+        if ($channel['name'] === $channelName) {
+            return $channel['id'];
+        }
+    }
+})();
+if ($channelId === null) {
+    echo "Can't find channel id\n";
+    exit(1);
+}
+
+$deleteTs = (function () use ($oauthToken, $channelId) {
+    $url = "https://slack.com/api/conversations.history?token=${oauthToken}&channel=${channelId}";
+    $json = json_decode(file_get_contents($url), true);
+    $tss = [];
+    foreach ($json['messages'] as $message) {
+        $tss[] = $message['ts'];
+    }
+    return $tss;
+})();
 
 $progress = 0;
-$tsCount = count($tsList);
+$tsCount = count($deleteTs);
 echo "${progress}/${tsCount}";
-foreach($tsList as $v){
-    deleteChat($slackApiKey, $channelId, $v);
+foreach ($deleteTs as $ts) {
+    $url = "https://slack.com/api/chat.delete?token=${oauthToken}&channel=${channelId}&ts=${ts}";
+    $options = ['http' => ['method' => 'POST']];
+    file_get_contents($url, false, stream_context_create($options));
     $progress++;
     echo "\r";
     echo "${progress}/${tsCount}";
 }
 echo "\n";
-exit(0);
 
-
-function getChannelId($slackApiKey, $channelStr){
-    $url = "https://slack.com/api/channels.list?token=${slackApiKey}";
-    $content = file_get_contents($url);
-    if($content === false){
-        echo "Failed to get response from Slack Api\n";
-        exit(1);
-    }
-    $json = json_decode($content, true);
-    echoErr($json);
-
-    $channels = [];
-    foreach($json['channels'] as $v){
-        $channels[$v['name']] = $v['id'];
-    }
-
-    if(isset($channels[$channelStr])){
-        return $channels[$channelStr];
-    }else{
-        echo "Failed to get channel id from string\n";
-        exit(1);
-    }
-}
-
-function getTsList($slackApiKey, $channelId){
-    $tsList = [];
-    $latest = '';
-    $hasMore = true;
-    while($hasMore){
-        $url = "https://slack.com/api/channels.history?token=${slackApiKey}&channel=${channelId}&latest=${latest}";
-        $content = file_get_contents($url);
-        if($content === false){
-            echo "Failed to get response from Slack Api\n";
-            exit(1);
-        }
-        $json = json_decode($content, true);
-        echoErr($json);
-        $hasMore = $json['has_more'];
-        foreach($json['messages'] as $v){
-            $tsList[] = $v['ts'];
-        }
-        if(count($tsList) < 1){
-            return $tsList;
-        }
-        $latest = $tsList[count($tsList) - 1];
-    }
-    return $tsList;
-}
-
-function deleteChat($slackApiKey, $channelId, $ts){
-    $data = [
-        'token' => $slackApiKey,
-        'channel' => $channelId,
-        'ts' => $ts
-    ];
-    $url = 'https://slack.com/api/chat.delete';
-    $options = [
-        'http' => [
-            'method' => 'POST',
-            'content' => http_build_query($data)
-        ]
-    ];
-    $content = @file_get_contents($url, false, stream_context_create($options));
-    if($content === false){
-        echo "Failed to delete message\n";
-        echo "ts is ${ts}\n\n";
-        return;
-    }
-    $json = json_decode($content, true);
-    echoErr($json, false);
-}
-
-function echoErr($json, $isExit = true){
-    if($json['ok'] === false){
-        echo "Error: {$json['error']}\n";
-        if($isExit){
-            exit(1);
-        }
-    }
-}
-
-function help(){
+function help()
+{
     echo "Slack Deleter Help\n";
     echo "Delete all messages in channel of Slack\n";
     echo "\n";
     echo "Requirements:\n";
-    echo "\t-t, --token\tSlack api token\n";
-    echo "\t-c, --channel\tChannel name of to delete messages\n";
+    echo "  -t, --token\n";
+    echo "    Slack OAuth Access Token\n";
+    echo "      Not Bot User OAuth Access Token\n";
+    echo "    Require User Token Scopes:\n";
+    echo "      * channels:history\n";
+    echo "      * channels:read\n";
+    echo "      * chat:write\n";
+    echo "  -c, --channel\n";
+    echo "    Channel name of to delete messages\n";
 }
-
