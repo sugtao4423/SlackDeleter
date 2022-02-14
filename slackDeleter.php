@@ -35,12 +35,19 @@ if ($channelId === null) {
 }
 
 $deleteTs = (function () use ($oauthToken, $channelId) {
-    $url = "https://slack.com/api/conversations.history?token=${oauthToken}&channel=${channelId}";
-    $json = json_decode(file_get_contents($url), true);
-    $tss = [];
-    foreach ($json['messages'] as $message) {
-        $tss[] = $message['ts'];
+    $cursor = '';
+    while (true) {
+        $url = "https://slack.com/api/conversations.history?token=${oauthToken}&channel=${channelId}&limit=1000&cursor=${cursor}";
+        $json = json_decode(file_get_contents($url), true);
+        $cursor = $json['response_metadata']['next_cursor'] ?? '';
+        foreach ($json['messages'] as $message) {
+            $tss[] = $message['ts'];
+        }
+        if (!$json['has_more']) {
+            break;
+        }
     }
+    arsort($tss);
     return $tss;
 })();
 
