@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 $option = getopt('t:c:h', ['token:', 'channel:', 'help']);
 
-$oauthToken = isset($option['t']) ? $option['t'] : @$option['token'];
-$channelName = isset($option['c']) ? $option['c'] : @$option['channel'];
+$oauthToken = $option['t'] ?? @$option['token'];
+$channelName = $option['c'] ?? @$option['channel'];
 
 if (isset($option['h']) || isset($option['help'])) {
     help();
